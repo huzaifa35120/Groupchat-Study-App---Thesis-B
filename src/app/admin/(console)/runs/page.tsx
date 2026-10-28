@@ -36,7 +36,7 @@ const PRESETS: { label: string; description: string; name: string; config: Parti
 
 export default function RunsPage() {
   const { data, error, reload } = useApi<{ runs: RunListItem[] }>("/api/admin/runs");
-  const { data: overview } = useApi<Overview>("/api/admin/overview");
+  const { data: overview } = useApi<Overview>("/api/admin/overview", { interval: 10000 });
 
   return (
     <>
@@ -85,6 +85,7 @@ function NewRun({ overview, onCreated }: { overview: Overview | null; onCreated:
 
   const ready = overview?.groups.flatMap((g) => g.sessions.filter((s) => s.status === "ended" && s.masked > 0).map((s) => ({ ...s, group: g.name }))) ?? [];
   const chosen = ready.filter((s) => selected[s.id]);
+  const needGaps = overview?.groups.flatMap((g) => g.sessions.filter((s) => s.status === "ended" && s.masked === 0 && s.messages > 0).map((s) => ({ ...s, group: g.name }))) ?? [];
 
   const create = async () => {
     setBusy(true);
@@ -100,8 +101,38 @@ function NewRun({ overview, onCreated }: { overview: Overview | null; onCreated:
   };
 
   return (
-    <Card title="New run" description="Settings are stored with the run and with every prediction.">
+    <Card title="New run" description="Tick the sessions and create the run. The defaults are the main condition from your project plan.">
       <div className="space-y-4">
+        <Field label="Run name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <div>
+          <span className="mb-1 block text-sm font-medium text-stone-700">Sessions ({chosen.length} selected, {chosen.reduce((a, s) => a + s.masked, 0)} gaps)</span>
+          {ready.length === 0 ? (
+            <div className="space-y-2">
+              <Notice>No finished sessions have gaps yet. Open a session, go to <b>Transcript &amp; gaps</b>, and click <b>Pick gaps</b>.</Notice>
+              {needGaps.map((s) => (
+                <Link key={s.id} href={`/admin/sessions/${s.id}`} className="block text-sm font-medium text-accent hover:underline">
+                  Pick gaps for {s.group} · {s.title} →
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1.5 rounded-lg border border-stone-200 p-3">
+              <button type="button" className="mb-1 text-xs text-accent hover:underline" onClick={() => setSelected(Object.fromEntries(ready.map((s) => [s.id, true])))}>Select all</button>
+              {ready.map((s) => (
+                <Checkbox key={s.id} label={`${s.group} · ${s.title}`} hint={`${s.masked} gaps of ${s.messages} messages`} checked={Boolean(selected[s.id])} onChange={(v) => setSelected((x) => ({ ...x, [s.id]: v }))} />
+              ))}
+            </div>
+          )}
+        </div>
+        {err && <Notice tone="error">{err}</Notice>}
+        <Button className="w-full" busy={busy} disabled={!chosen.length || !name.trim()} onClick={() => void create()}>Create run</Button>
+
+        <details className="rounded-lg border border-stone-200 px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-stone-700">Advanced settings (optional)</summary>
+          <p className="mt-2 text-xs text-stone-500">
+            Only needed for extra comparison runs in your thesis, e.g. &ldquo;does the AI do worse when it only sees what came before the gap?&rdquo;. Run the same sessions again with a different preset and the Results page compares the two.
+          </p>
+          <div className="mt-3 space-y-4">
         <div>
           <span className="mb-1 block text-sm font-medium text-stone-700">Preset</span>
           <div className="grid grid-cols-2 gap-2">
@@ -117,20 +148,6 @@ function NewRun({ overview, onCreated }: { overview: Overview | null; onCreated:
               </button>
             ))}
           </div>
-        </div>
-        <Field label="Run name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <div>
-          <span className="mb-1 block text-sm font-medium text-stone-700">Sessions ({chosen.length} selected, {chosen.reduce((a, s) => a + s.masked, 0)} gaps)</span>
-          {ready.length === 0 ? (
-            <Notice>No finished sessions with gaps yet.</Notice>
-          ) : (
-            <div className="space-y-1.5 rounded-lg border border-stone-200 p-3">
-              <button type="button" className="mb-1 text-xs text-accent hover:underline" onClick={() => setSelected(Object.fromEntries(ready.map((s) => [s.id, true])))}>Select all</button>
-              {ready.map((s) => (
-                <Checkbox key={s.id} label={`${s.group} · ${s.title}`} hint={`${s.masked} gaps of ${s.messages} messages`} checked={Boolean(selected[s.id])} onChange={(v) => setSelected((x) => ({ ...x, [s.id]: v }))} />
-              ))}
-            </div>
-          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Model" hint="Claude Opus 5 by default"><Input value={model} onChange={(e) => setModel(e.target.value)} className="font-mono" /></Field>
@@ -168,8 +185,8 @@ function NewRun({ overview, onCreated }: { overview: Overview | null; onCreated:
           <Textarea rows={12} value={config.systemPrompt} onChange={(e) => set("systemPrompt", e.target.value)} className="mt-2 font-mono text-xs" />
           <Field label="Prompt version label" className="mt-2"><Input value={config.promptVersion} onChange={(e) => set("promptVersion", e.target.value)} /></Field>
         </details>
-        {err && <Notice tone="error">{err}</Notice>}
-        <Button className="w-full" busy={busy} disabled={!chosen.length || !name.trim()} onClick={() => void create()}>Create run</Button>
+          </div>
+        </details>
       </div>
     </Card>
   );
