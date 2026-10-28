@@ -10,6 +10,7 @@ import { INFO_SECTIONS, INVESTIGATOR, INVESTIGATOR_EMAIL, STUDY_TITLE, SUPERVISO
 
 interface GroupResponse {
   group: { code: string; name: string };
+  codeChecked: boolean;
   me: { pseudonym: string } | null;
   sessions: { id: string; number: number; title: string; status: string; endsAt: string | null }[];
 }
@@ -32,9 +33,11 @@ export default function JoinPage() {
     headers,
   });
 
-  // Stored code no longer valid (e.g. withdrawn or deleted)
+  // Stored code no longer valid (e.g. withdrawn or deleted). Only trust a response
+  // that was fetched with a code: right after joining, the last response is still
+  // the one loaded before the participant had one.
   useEffect(() => {
-    if (data && access && !data.me) {
+    if (data && access && data.codeChecked && !data.me) {
       clearAccess(groupCode);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with server state
       setAccess(null);
@@ -58,6 +61,16 @@ export default function JoinPage() {
     );
   }
   if (!data) return null;
+
+  if (access && !data.me && !data.codeChecked) {
+    return (
+      <Shell>
+        <div className="flex items-center gap-2 text-sm text-stone-500">
+          <Spinner /> Loading your sessions…
+        </div>
+      </Shell>
+    );
+  }
 
   if (!access || !data.me) {
     return (

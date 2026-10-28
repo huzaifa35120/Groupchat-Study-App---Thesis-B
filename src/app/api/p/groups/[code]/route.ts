@@ -26,9 +26,12 @@ export const GET = route(async (req, ctx: RouteContext<"/api/p/groups/[code]">) 
   if (sError) throw new HttpError(500, sError.message);
   const sessions = await Promise.all(((sessionRows ?? []) as SessionRow[]).map(enforceTimer));
 
-  const me = await participantFromCode(req.headers.get("x-access-code"));
+  const accessCode = req.headers.get("x-access-code");
+  const me = await participantFromCode(accessCode);
   return json({
     group: { code: group.code, name: group.name },
+    // codeChecked lets the page tell "your code is no longer valid" apart from "no code sent"
+    codeChecked: Boolean(accessCode),
     me: me && me.group_id === group.id ? { pseudonym: me.pseudonym } : null,
     sessions: sessions.map((s) => ({
       id: s.id,
