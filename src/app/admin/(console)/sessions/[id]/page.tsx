@@ -200,7 +200,12 @@ export default function SessionPage() {
 function GapsTab({ data, reload }: { data: SessionDetail; reload: () => Promise<void> }) {
   const s = data.session;
   const cfg: MaskConfig | null = s.mask_config;
-  const [opts, setOpts] = useState({ ...DEFAULT_MASK_OPTIONS, ...(cfg ?? {}) });
+  // Start from the last random draw's settings; hand-picked gaps carry no ratio or seed.
+  const [opts, setOpts] = useState(() => {
+    const base = { ...DEFAULT_MASK_OPTIONS };
+    if (cfg?.method !== "random") return base;
+    return { ratio: cfg.ratio, seed: cfg.seed, skipFirst: cfg.skipFirst, protectLast: cfg.protectLast, noAdjacent: cfg.noAdjacent, stratify: cfg.stratify };
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selectionWarnings, setSelectionWarnings] = useState<string[]>([]);

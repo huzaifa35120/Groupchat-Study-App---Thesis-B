@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requireResearcher } from "@/lib/auth";
 import { MSG_TYPE_IDS, OPERATOR_LABEL } from "@/lib/constants";
 import { HttpError, json, route } from "@/lib/http";
+import { DEFAULT_MASK_OPTIONS } from "@/lib/masking";
 import { enforceTimer, getSession } from "@/lib/sessions";
 import { db } from "@/lib/supabase/admin";
 import type { MessageRow } from "@/lib/types";
@@ -53,7 +54,7 @@ export const PATCH = route(async (req, ctx: RouteContext<"/api/admin/sessions/[i
     const { count } = await sb.from("messages").select("id", { count: "exact", head: true }).eq("session_id", id).eq("is_masked", true);
     const maskConfig = session.mask_config
       ? { ...session.mask_config, edited: true, count: count ?? 0 }
-      : { method: "manual", generatedAt: new Date().toISOString(), count: count ?? 0, ratio: 0, seed: 0, skipFirst: 3, protectLast: true, noAdjacent: true, stratify: false };
+      : { ...DEFAULT_MASK_OPTIONS, method: "manual", generatedAt: new Date().toISOString(), count: count ?? 0 };
     await sb.from("sessions").update({ mask_config: maskConfig }).eq("id", id);
   }
   return json({ ok: true });
