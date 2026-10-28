@@ -278,9 +278,9 @@ function GapsTab({ data, reload }: { data: SessionDetail; reload: () => Promise<
       </Card>
 
       <div className="space-y-4">
-        <Card title="Choose gaps" description="Seeded random selection, reproducible from the seed.">
+        <Card title="Gaps" description="Picked automatically when the session ends (about 20%, never the first three, never two in a row, never the last). Re-pick here only if you want different settings.">
           {s.status !== "ended" ? (
-            <Notice>Gaps are chosen after the session ends.</Notice>
+            <Notice>Gaps are picked automatically as soon as the session ends.</Notice>
           ) : (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -305,7 +305,7 @@ function GapsTab({ data, reload }: { data: SessionDetail; reload: () => Promise<
           <div className="text-3xl font-semibold tabular">{masked}<span className="text-base font-normal text-stone-500"> / {participantMessages.length} ({pct(participantMessages.length ? masked / participantMessages.length : null)})</span></div>
           {cfg && (
             <p className="mt-2 text-xs text-stone-500">
-              {cfg.method === "random" ? `Random, seed ${cfg.seed}, ${pct(cfg.ratio)} target` : "Picked by hand"}
+              {cfg.method === "random" ? `${cfg.auto ? "Picked automatically" : "Re-picked"}: random, seed ${cfg.seed}, ${pct(cfg.ratio)} target` : cfg.count ? "Picked by hand" : "Cleared"}
               {cfg.edited ? " · edited by hand" : ""}
             </p>
           )}

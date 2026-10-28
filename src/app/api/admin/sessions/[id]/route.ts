@@ -3,7 +3,7 @@ import { requireResearcher } from "@/lib/auth";
 import { HttpError, json, route } from "@/lib/http";
 import { DEFAULT_MASK_OPTIONS, validateMasks } from "@/lib/masking";
 import { speakerLabels } from "@/lib/participants";
-import { enforceTimer, getMessages, getSession } from "@/lib/sessions";
+import { enforceTimer, ensureGaps, getMessages, getSession } from "@/lib/sessions";
 import { db } from "@/lib/supabase/admin";
 import { messageFeatures } from "@/lib/text/features";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const GET = route(async (_req, ctx: RouteContext<"/api/admin/sessions/[id]">) => {
   await requireResearcher();
   const { id } = await ctx.params;
-  const session = await enforceTimer(await getSession(id));
+  const session = await ensureGaps(await enforceTimer(await getSession(id)));
   const sb = db();
   const [{ data: group }, messages, labels, { data: participants }] = await Promise.all([
     sb.from("study_groups").select("id, name, code").eq("id", session.group_id).single(),

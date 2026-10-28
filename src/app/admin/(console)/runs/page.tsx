@@ -108,10 +108,10 @@ function NewRun({ overview, onCreated }: { overview: Overview | null; onCreated:
           <span className="mb-1 block text-sm font-medium text-stone-700">Sessions ({chosen.length} selected, {chosen.reduce((a, s) => a + s.masked, 0)} gaps)</span>
           {ready.length === 0 ? (
             <div className="space-y-2">
-              <Notice>No finished sessions have gaps yet. Open a session, go to <b>Transcript &amp; gaps</b>, and click <b>Pick gaps</b>.</Notice>
+              <Notice>No finished sessions with gaps yet. Gaps are picked automatically when a session ends; a session needs at least a few messages to get any.</Notice>
               {needGaps.map((s) => (
                 <Link key={s.id} href={`/admin/sessions/${s.id}`} className="block text-sm font-medium text-accent hover:underline">
-                  Pick gaps for {s.group} · {s.title} →
+                  Check gaps for {s.group} · {s.title} →
                 </Link>
               ))}
             </div>

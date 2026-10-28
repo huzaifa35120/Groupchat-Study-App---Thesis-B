@@ -48,6 +48,10 @@ export const POST = route(async (req, ctx: RouteContext<"/api/admin/sessions/[id
       break;
     case "reopen":
       if (session.status !== "ended") throw new HttpError(409, "Only an ended session can be reopened.");
+      if (session.mask_config?.auto && !session.mask_config.edited) {
+        await sb.from("messages").update({ is_masked: false }).eq("session_id", id).eq("is_masked", true);
+        await sb.from("sessions").update({ mask_config: null }).eq("id", id);
+      }
       result = await update(
         { status: "live", ended_at: null, ends_at: new Date(now + (seconds ?? 120) * 1000).toISOString() },
         "ended",

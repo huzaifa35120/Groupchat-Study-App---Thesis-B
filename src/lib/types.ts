@@ -28,6 +28,7 @@ export interface MaskConfig extends MaskOptions {
   generatedAt: string;
   count: number;
   edited?: boolean;
+  auto?: boolean; // picked automatically when the session ended
 }
 
 export interface SessionRow {

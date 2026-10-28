@@ -4,6 +4,7 @@ import { requireResearcher } from "@/lib/auth";
 import { DEFAULT_MODEL, EFFORT_LEVELS } from "@/lib/constants";
 import { fetchAll } from "@/lib/fetch-all";
 import { HttpError, json, route } from "@/lib/http";
+import { ensureGaps } from "@/lib/sessions";
 import { db } from "@/lib/supabase/admin";
 import type { MessageRow, PredictionRow, RunRow, SessionRow } from "@/lib/types";
 
@@ -70,6 +71,7 @@ export const POST = route(async (req) => {
   if (error) throw new HttpError(500, error.message);
   const notEnded = ((sessions ?? []) as SessionRow[]).filter((s) => s.status !== "ended");
   if (notEnded.length) throw new HttpError(409, "Every selected session must have ended.");
+  await Promise.all(((sessions ?? []) as SessionRow[]).map(ensureGaps));
 
   const messages = await fetchAll<MessageRow>(() =>
     sb.from("messages").select("*").in("session_id", body.sessionIds).order("id"),

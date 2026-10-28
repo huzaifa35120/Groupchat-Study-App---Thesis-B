@@ -1,9 +1,12 @@
-// Session lifecycle: lazy timer enforcement, ending, and recording statistics.
+// Session lifecycle: lazy timer enforcement, ending, recording statistics and
+// choosing the gaps.
 import { computeSessionStats } from "./analysis/session-stats";
 import { HttpError } from "./http";
+import { DEFAULT_MASK_OPTIONS, selectMasks, type MaskOptions } from "./masking";
 import { speakerLabels } from "./participants";
 import { db } from "./supabase/admin";
-import type { MessageRow, SessionRow } from "./types";
+import { lengthClass } from "./text/features";
+import type { MaskConfig, MessageRow, SessionRow } from "./types";
 
 export async function getSession(id: string): Promise<SessionRow> {
   const { data, error } = await db().from("sessions").select("*").eq("id", id).maybeSingle();
@@ -61,7 +64,35 @@ export async function endSession(session: SessionRow, endedAt: string): Promise<
     .maybeSingle();
   if (error) throw new HttpError(500, error.message);
   if (!data) return getSession(session.id);
-  return recordSessionStats(data as SessionRow);
+  const recorded = await recordSessionStats(data as SessionRow);
+  return ensureGaps(recorded);
+}
+
+// Replaces the session's gaps with a seeded random selection.
+export async function applyMaskSelection(sessionId: string, options: MaskOptions, auto = false) {
+  const messages = await getMessages(sessionId);
+  const selection = selectMasks(
+    messages.map((m) => ({ id: m.id, isOperator: m.is_operator, lengthClass: lengthClass(m.body) })),
+    options,
+  );
+  const sb = db();
+  const { error: clearError } = await sb.from("messages").update({ is_masked: false }).eq("session_id", sessionId).eq("is_masked", true);
+  if (clearError) throw new HttpError(500, clearError.message);
+  if (selection.ids.length) {
+    const { error } = await sb.from("messages").update({ is_masked: true }).in("id", selection.ids);
+    if (error) throw new HttpError(500, error.message);
+  }
+  const maskConfig: MaskConfig = { ...options, method: "random", auto, generatedAt: new Date().toISOString(), count: selection.ids.length };
+  const { data, error } = await sb.from("sessions").update({ mask_config: maskConfig }).eq("id", sessionId).select("*").single();
+  if (error) throw new HttpError(500, error.message);
+  return { selection, session: data as SessionRow };
+}
+
+// Gaps are picked automatically, with the default rules, once a session has
+// ended. A session whose gaps were already picked, edited or cleared is left alone.
+export async function ensureGaps(session: SessionRow): Promise<SessionRow> {
+  if (session.status !== "ended" || session.mask_config) return session;
+  return (await applyMaskSelection(session.id, DEFAULT_MASK_OPTIONS, true)).session;
 }
 
 // Sessions run on a timer but there is no background worker, so whoever looks at

@@ -1,6 +1,6 @@
 import { requireResearcher } from "@/lib/auth";
 import { HttpError, json, route } from "@/lib/http";
-import { enforceTimer } from "@/lib/sessions";
+import { enforceTimer, ensureGaps } from "@/lib/sessions";
 import { db } from "@/lib/supabase/admin";
 import type { SessionRow } from "@/lib/types";
 
@@ -16,7 +16,7 @@ export const GET = route(async () => {
     sb.from("prediction_runs").select("id, name, status, created_at").order("created_at", { ascending: false }),
   ]);
   for (const r of [groups, sessions, participants, runs]) if (r.error) throw new HttpError(500, r.error.message);
-  const sessionRows = await Promise.all(((sessions.data ?? []) as SessionRow[]).map(enforceTimer));
+  const sessionRows = await Promise.all(((sessions.data ?? []) as SessionRow[]).map(async (s) => ensureGaps(await enforceTimer(s))));
   const { data: counts } = await sb.from("messages").select("session_id, is_operator, is_masked").limit(20000);
 
   return json({
