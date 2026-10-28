@@ -103,3 +103,9 @@ export function describeError(err: unknown): string {
   if (err instanceof Anthropic.APIError) return `Anthropic API error ${err.status ?? ""}: ${err.message}`;
   return err instanceof Error ? err.message : String(err);
 }
+
+// Setup check: confirms the key is valid and the model is available (free call).
+export async function checkModelAccess(model: string): Promise<string> {
+  const info = await anthropic().models.retrieve(model);
+  return info.id;
+}

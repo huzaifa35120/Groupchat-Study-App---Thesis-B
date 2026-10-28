@@ -20,13 +20,15 @@ interface Health {
   supabaseConfigured: boolean;
   database: string;
   anthropicConfigured: boolean;
+  anthropic: string;
   researcherEmails: number;
 }
 
 export default function Dashboard() {
   const router = useRouter();
   const { data, error, reload } = useApi<Overview>("/api/admin/overview", { interval: 8000 });
-  const { data: health } = useApi<Health>("/api/health");
+  const { data: health } = useApi<Health>("/api/health?deep=1");
+  const [modelTest, setModelTest] = useState<{ busy: boolean; result?: string; error?: string }>({ busy: false });
   const [name, setName] = useState("");
   const [count, setCount] = useState(3);
   const [minutes, setMinutes] = useState(10);
@@ -115,6 +117,31 @@ export default function Dashboard() {
               {err && <Notice tone="error">{err}</Notice>}
               <Button type="submit" busy={busy} disabled={!name.trim()} className="w-full">Create group</Button>
             </form>
+          </Card>
+          <Card title="Setup">
+            <dl className="space-y-1.5 text-sm">
+              <div className="flex justify-between gap-2"><dt className="text-stone-500">Database</dt><dd>{health ? (health.database === "ok" ? "✓ connected" : health.database) : "…"}</dd></div>
+              <div className="flex justify-between gap-2"><dt className="text-stone-500">Claude API</dt><dd className="text-right">{health ? (health.anthropic.startsWith("ok") ? `✓ ${health.anthropic.slice(4, -1)}` : health.anthropic) : "…"}</dd></div>
+            </dl>
+            <Button
+              className="mt-3 w-full"
+              variant="secondary"
+              size="sm"
+              busy={modelTest.busy}
+              onClick={async () => {
+                setModelTest({ busy: true });
+                try {
+                  const r = await api<{ output: string; outputTokens: number; latencyMs: number }>("/api/admin/test-model", { method: "POST" });
+                  setModelTest({ busy: false, result: `“${r.output}” (${r.outputTokens} output tokens, ${(r.latencyMs / 1000).toFixed(1)} s)` });
+                } catch (e) {
+                  setModelTest({ busy: false, error: errorText(e) });
+                }
+              }}
+            >
+              Test Claude Opus 5
+            </Button>
+            {modelTest.result && <p className="mt-2 text-xs text-stone-600">Filled a sample gap: {modelTest.result}</p>}
+            {modelTest.error && <div className="mt-2"><Notice tone="error">{modelTest.error}</Notice></div>}
           </Card>
           <Card title="Study checklist">
             <ol className="space-y-2 text-sm">
