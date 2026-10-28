@@ -42,6 +42,7 @@ export interface GapRow {
   scoreRounded: number | null;
   tags: string[];
   notes: string | null;
+  llmReason: string | null;
   raterScores: Record<string, number>;
   contextBefore: number | null;
   contextAfter: number | null;
@@ -142,8 +143,54 @@ export interface Evaluation {
   style: { key: string; label: string; original: number | null; ai: number | null; baseline: number | null; diff: number | null; p: number | null }[];
   agreement: ({ a: string; b: string } & S.Agreement)[];
   usage: { inputTokens: number; outputTokens: number; meanLatencyMs: number | null; costUsd: number | null };
+  plain: PlainSummary;
   gaps: GapRow[];
 }
+
+// Plain-language view of the gap table: counts and simple averages only.
+export interface PlainGroup {
+  key: string;
+  label: string;
+  n: number;
+  avg: number | null;
+  meaningKept: number;
+  fullMatch: number;
+  noFit: number;
+  topProblem: { label: string; count: number } | null;
+}
+
+export interface GapExample {
+  sessionLabel: string;
+  position: number;
+  original: string;
+  predicted: string;
+  score: number | null;
+  type: string;
+  tags: string[];
+}
+
+export interface PlainSummary {
+  scored: number;
+  outcomes: { score: number; title: string; description: string; count: number; share: number | null }[];
+  findings: string[];
+  byType: PlainGroup[];
+  byLength: PlainGroup[];
+  bySession: PlainGroup[];
+  problems: { id: string; label: string; description: string; count: number; share: number | null; types: string[]; example: GapExample | null }[];
+  typeScore: { key: string; label: string; counts: number[]; n: number }[];
+  typeProblem: { types: { key: string; label: string }[]; problems: { id: string; label: string }[]; cells: number[][] };
+  best: GapExample[];
+  worst: GapExample[];
+  length: { origAvg: number | null; aiAvg: number | null; longer: number; shorter: number; same: number; total: number };
+  style: { label: string; original: number | null; ai: number | null }[];
+}
+
+export const OUTCOMES = [
+  { score: 3, title: "Nailed it", description: "Same meaning, similar style" },
+  { score: 2, title: "Right meaning, different style", description: "Said the same thing, but didn't sound like the person" },
+  { score: 1, title: "Plausible but wrong", description: "Fits the chat, but isn't what was said" },
+  { score: 0, title: "Didn't fit", description: "Wouldn't make sense at that point in the chat" },
+] as const;
 
 export interface RunComparison {
   runId: string;
@@ -281,6 +328,166 @@ function configDiff(a: RunRow["config"], b: RunRow["config"]): string[] {
   return out;
 }
 
+function example(g: GapRow): GapExample {
+  return {
+    sessionLabel: g.sessionLabel,
+    position: g.position,
+    original: g.original,
+    predicted: g.predicted,
+    score: g.score,
+    type: typeLabel(g.msgType),
+    tags: g.tags,
+  };
+}
+
+function plainGroup(key: string, label: string, rows: GapRow[]): PlainGroup {
+  const scored = rows.filter((g) => g.scoreRounded !== null);
+  const tagCounts = new Map<string, number>();
+  for (const g of rows) for (const t of g.tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+  const top = [...tagCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return {
+    key,
+    label,
+    n: scored.length,
+    avg: S.mean(scored.map((g) => g.score!)),
+    meaningKept: scored.filter((g) => g.scoreRounded! >= 2).length,
+    fullMatch: scored.filter((g) => g.scoreRounded === 3).length,
+    noFit: scored.filter((g) => g.scoreRounded === 0).length,
+    topProblem: top ? { label: tagLabel(top[0]), count: top[1] } : null,
+  };
+}
+
+function plainSummary(gaps: GapRow[], style: Evaluation["style"]): PlainSummary {
+  const scored = gaps.filter((g) => g.scoreRounded !== null);
+  const n = scored.length;
+  const ratio = (x: number) => (n ? x / n : null);
+  const typeKey = (g: GapRow) => g.msgType ?? "unclassified";
+  const typeOrder = [...MSG_TYPES.map((t) => t.id as string), "unclassified"];
+  const typeKeys = [...new Set(scored.map(typeKey))].sort((a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b));
+  const typeName = (k: string) => typeLabel(k === "unclassified" ? null : k);
+
+  const outcomes = OUTCOMES.map((o) => {
+    const count = scored.filter((g) => g.scoreRounded === o.score).length;
+    return { score: o.score, title: o.title, description: o.description, count, share: ratio(count) };
+  });
+
+  const byType = typeKeys.map((k) => plainGroup(k, typeName(k), scored.filter((g) => typeKey(g) === k)));
+  const byLength = [
+    plainGroup("short", "Short reactions (3 words or fewer)", scored.filter((g) => g.lengthClass === "short")),
+    plainGroup("longer", "Longer messages", scored.filter((g) => g.lengthClass === "longer")),
+  ];
+  const sessions = [...new Set(scored.map((g) => g.sessionLabel))];
+  const bySession = sessions.map((label) => plainGroup(label, label, scored.filter((g) => g.sessionLabel === label)));
+
+  const usedExamples = new Set<string>();
+  const problems = FAILURE_TAGS.map((t) => {
+    const rows = scored.filter((g) => g.tags.includes(t.id));
+    const typeCounts = new Map<string, number>();
+    for (const g of rows) typeCounts.set(typeKey(g), (typeCounts.get(typeKey(g)) ?? 0) + 1);
+    // Lowest-scoring example, preferring one not already shown for another problem
+    const worstFirst = [...rows].sort((a, b) => a.score! - b.score!);
+    const pick = worstFirst.find((g) => !usedExamples.has(g.predictionId)) ?? worstFirst[0];
+    if (pick) usedExamples.add(pick.predictionId);
+    return {
+      id: t.id as string,
+      label: t.label as string,
+      description: t.description as string,
+      count: rows.length,
+      share: ratio(rows.length),
+      types: [...typeCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, c]) => `${typeName(k)} (${c})`),
+      example: pick ? example(pick) : null,
+    };
+  })
+    .filter((p) => p.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  const typeScore = typeKeys.map((k) => {
+    const rows = scored.filter((g) => typeKey(g) === k);
+    return { key: k, label: typeName(k), n: rows.length, counts: [0, 1, 2, 3].map((sc) => rows.filter((g) => g.scoreRounded === sc).length) };
+  });
+  const problemCols = problems.map((p) => ({ id: p.id, label: p.label }));
+  const typeProblem = {
+    types: typeKeys.map((k) => ({ key: k, label: typeName(k) })),
+    problems: problemCols,
+    cells: typeKeys.map((k) => problemCols.map((p) => scored.filter((g) => typeKey(g) === k && g.tags.includes(p.id)).length)),
+  };
+
+  const byScoreThenSimilarity = [...scored].sort((a, b) => b.score! - a.score! || b.metrics.chrF - a.metrics.chrF);
+  const best = byScoreThenSimilarity.filter((g) => g.scoreRounded! >= 2).slice(0, 3).map(example);
+  const worst = [...byScoreThenSimilarity].reverse().filter((g) => g.scoreRounded! <= 1).slice(0, 3).map(example);
+
+  const length = {
+    origAvg: S.mean(gaps.map((g) => g.metrics.origWords)),
+    aiAvg: S.mean(gaps.map((g) => g.metrics.predWords)),
+    longer: gaps.filter((g) => g.metrics.predWords > g.metrics.origWords).length,
+    shorter: gaps.filter((g) => g.metrics.predWords < g.metrics.origWords).length,
+    same: gaps.filter((g) => g.metrics.predWords === g.metrics.origWords).length,
+    total: gaps.length,
+  };
+  const styleDiffs = style
+    .filter((x) => x.diff !== null && Math.abs(x.diff) >= 0.15)
+    .sort((a, b) => Math.abs(b.diff!) - Math.abs(a.diff!))
+    .slice(0, 4)
+    .map((x) => ({ label: x.label, original: x.original, ai: x.ai }));
+
+  // Plain-English findings
+  const findings: string[] = [];
+  if (n) {
+    const kept = outcomes.filter((o) => o.score >= 2).reduce((a, o) => a + o.count, 0);
+    const nailed = outcomes.find((o) => o.score === 3)!.count;
+    const noFit = outcomes.find((o) => o.score === 0)!.count;
+    findings.push(
+      `The AI kept the meaning in ${kept} of ${n} gaps (${pct(ratio(kept))}) and matched both meaning and style in ${nailed} (${pct(ratio(nailed))}). ${noFit ? `${noFit} ${noFit === 1 ? "reply" : "replies"} didn't fit the conversation at all.` : "Every reply at least fitted the conversation."}`,
+    );
+    const ranked = byType.filter((g) => g.n > 0 && g.avg !== null).sort((a, b) => b.avg! - a.avg!);
+    if (ranked.length >= 2) {
+      const best = ranked[0];
+      const worst = ranked[ranked.length - 1];
+      findings.push(
+        `By message type it did best on ${best.label.toLowerCase()} (average ${num(best.avg, 1)} out of 3, ${best.meaningKept} of ${best.n} kept the meaning) and worst on ${worst.label.toLowerCase()} (average ${num(worst.avg, 1)}, ${worst.meaningKept} of ${worst.n}).`,
+      );
+    }
+    const [sh, lo] = byLength;
+    if (sh.n && lo.n) {
+      findings.push(
+        `Short reactions kept their meaning ${sh.meaningKept} of ${sh.n} times (${pct(sh.meaningKept / sh.n)}); longer messages ${lo.meaningKept} of ${lo.n} times (${pct(lo.meaningKept / lo.n)}).`,
+      );
+    }
+    if (problems.length) {
+      const top = problems[0];
+      findings.push(
+        `The most common problem was "${top.label.toLowerCase()}" (${top.count} of ${n} gaps)${problems[1] ? `, then "${problems[1].label.toLowerCase()}" (${problems[1].count})` : ""}.`,
+      );
+    }
+  }
+  if (gaps.length) {
+    findings.push(
+      `AI replies averaged ${num(length.aiAvg, 1)} words against ${num(length.origAvg, 1)} for the real messages; the AI wrote more in ${length.longer} of ${length.total} gaps and less in ${length.shorter}.`,
+    );
+  }
+  if (styleDiffs[0]) {
+    const d = styleDiffs[0];
+    findings.push(`The clearest style difference: ${d.label.toLowerCase()} in ${pct(d.original)} of the real messages but ${pct(d.ai)} of the AI's.`);
+  }
+  if (n && n < 20) findings.push(`Only ${n} gaps are scored so far, so treat these as early signs rather than firm results.`);
+
+  return {
+    scored: n,
+    outcomes,
+    findings,
+    byType,
+    byLength,
+    bySession,
+    problems,
+    typeScore,
+    typeProblem,
+    best,
+    worst,
+    length,
+    style: styleDiffs,
+  };
+}
+
 export function buildReport(input: ReportInput, options: { runId?: string | null; source?: string | null }): ResultsReport {
   const groups = new Map(input.groups.map((g) => [g.id, g]));
   const sessions = [...input.sessions].sort((a, b) => {
@@ -399,6 +606,7 @@ export function buildReport(input: ReportInput, options: { runId?: string | null
         const predScores = scoresByPred.get(p.id) ?? [];
         const chosen = sourceKey ? scoreFor(sourceKey, predScores) : { score: null, tags: [], msgType: null, notes: null };
         const llmType = predScores.find((s) => s.rater_type === "llm" && s.msg_type)?.msg_type ?? null;
+        const llmReason = predScores.find((s) => s.rater_type === "llm" && s.notes)?.notes ?? null;
         const metrics = p.metrics!;
         return {
           predictionId: p.id,
@@ -419,6 +627,7 @@ export function buildReport(input: ReportInput, options: { runId?: string | null
           scoreRounded: chosen.score === null ? null : Math.round(chosen.score),
           tags: chosen.tags,
           notes: chosen.notes,
+          llmReason,
           raterScores: Object.fromEntries(predScores.map((s) => [s.rater, s.score])),
           contextBefore: p.context_before,
           contextAfter: p.context_after,
@@ -606,6 +815,7 @@ export function buildReport(input: ReportInput, options: { runId?: string | null
         meanLatencyMs: S.mean(gaps.map((g) => g.latencyMs).filter((x): x is number => x !== null)),
         costUsd: price ? (inputTokens * price[0] + outputTokens * price[1]) / 1_000_000 : null,
       },
+      plain: plainSummary(gaps, style),
       gaps,
     };
   }

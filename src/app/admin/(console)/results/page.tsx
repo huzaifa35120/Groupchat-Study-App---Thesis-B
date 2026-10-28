@@ -6,8 +6,9 @@ import { ColumnChart, HBarChart, PairedHBarChart } from "@/components/charts";
 import { Badge, Button, Card, Empty, Notice, PageHeader, Select, Spinner, Stat, cx } from "@/components/ui";
 import type { GroupStat, ResultsReport } from "@/lib/analysis/report";
 import { useApi } from "@/lib/client";
-import { tagLabel, typeLabel } from "@/lib/constants";
+import { tagLabel } from "@/lib/constants";
 import { dateTime, num, pct, pText, seconds } from "@/lib/format";
+import { AtAGlance, BestWorst, GapExplorer, Grids, LengthStyle, PlainGroupTable, Problems } from "./plain";
 
 export default function ResultsPage() {
   return (
@@ -179,7 +180,6 @@ function Results() {
 
 function Evaluation({ report }: { report: ResultsReport }) {
   const e = report.evaluation!;
-  const [showGaps, setShowGaps] = useState(false);
   if (e.nPredictions === 0) return <Notice>This run has no finished predictions yet. Open the run and press Run predictions.</Notice>;
   const short = e.byLength[0];
   const longer = e.byLength[1];
@@ -192,6 +192,25 @@ function Evaluation({ report }: { report: ResultsReport }) {
         <Badge>effort {e.run.config.effort}</Badge>
         <Badge>{e.run.config.contextMode === "bidirectional" ? "both-sides context" : "preceding context only"}</Badge>
         <span>· {e.n} of {e.nPredictions} scored by <span className="font-medium">{e.source.label}</span></span>
+      </div>
+
+      {e.n > 0 && (
+        <>
+          <AtAGlance e={e} />
+          <PlainGroupTable title="By message type" description="What kind of message was hidden." rows={e.plain.byType} />
+          <PlainGroupTable title="Short reactions vs longer messages" description="Short = 3 words or fewer." rows={e.plain.byLength} />
+          <PlainGroupTable title="By conversation" rows={e.plain.bySession} />
+          <Grids e={e} />
+          <Problems e={e} />
+          <BestWorst e={e} />
+        </>
+      )}
+      <LengthStyle e={e} />
+      <GapExplorer gaps={e.gaps} />
+
+      <div className="border-t border-stone-200 pt-8">
+        <h3 className="text-lg font-semibold tracking-tight">Detailed statistics</h3>
+        <p className="text-sm text-stone-500">For the Method and Results chapters: confidence intervals, significance tests, automatic similarity measures and agreement between raters.</p>
       </div>
 
       {e.n === 0 ? (
@@ -368,31 +387,6 @@ function Evaluation({ report }: { report: ResultsReport }) {
         </div>
       </Card>
 
-      <Card
-        title={`All gaps (${e.gaps.length})`}
-        description="Paraphrase before quoting any example in the thesis."
-        actions={<Button size="sm" variant="secondary" onClick={() => setShowGaps(!showGaps)}>{showGaps ? "Hide" : "Show"}</Button>}
-      >
-        {showGaps && (
-          <Scroll>
-            <table className="data">
-              <thead><tr><th>Session</th><th className="num">#</th><th>Type</th><th>Original</th><th>AI</th><th className="num">Score</th><th>Tags</th><th className="num">chrF</th></tr></thead>
-              <tbody>
-                {e.gaps.map((g) => (
-                  <tr key={g.predictionId}>
-                    <td className="whitespace-nowrap">{g.sessionLabel}</td><td className="num">{g.position}</td>
-                    <td className="text-xs">{typeLabel(g.msgType)}<div className="text-stone-400">{g.lengthClass}</div></td>
-                    <td className="max-w-xs whitespace-pre-wrap break-words">{g.original}</td><td className="max-w-xs whitespace-pre-wrap break-words">{g.predicted}</td>
-                    <td className="num font-medium">{g.score === null ? "–" : num(g.score, g.score % 1 ? 1 : 0)}</td>
-                    <td className="text-xs">{g.tags.map(tagLabel).join(", ")}</td>
-                    <td className="num">{num(g.metrics.chrF)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Scroll>
-        )}
-      </Card>
     </div>
   );
 }

@@ -196,6 +196,41 @@ export function reportMarkdown(report: ResultsReport): string {
   if (e) {
     out.push(`## Evaluation: ${e.run.name}`, ``);
     out.push(`Model ${e.run.model}; score source: ${e.source.label}; ${e.n} of ${e.nPredictions} predictions scored.`, ``);
+
+    const P = e.plain;
+    if (P.scored) {
+      out.push(`### At a glance`, ``, ...P.findings.map((f) => `- ${f}`), ``);
+      out.push(table(["Outcome", "What it means", "Gaps", "%"], P.outcomes.map((o) => [`${o.score} · ${o.title}`, o.description, o.count, pct(o.share)])), ``);
+      const plainTable = (title: string, rows: typeof P.byType) => {
+        out.push(`#### ${title}`, ``);
+        out.push(
+          table(
+            ["", "Gaps", "Avg score", "Meaning kept", "Nailed it", "Didn't fit", "Most common problem"],
+            rows.map((g) => [g.label, g.n, num(g.avg, 1), `${g.meaningKept} (${pct(g.n ? g.meaningKept / g.n : null)})`, g.fullMatch, g.noFit, g.topProblem ? `${g.topProblem.label} (${g.topProblem.count})` : "–"]),
+          ),
+          ``,
+        );
+      };
+      plainTable("By message type", P.byType);
+      plainTable("Short reactions vs longer messages", P.byLength);
+      plainTable("By conversation", P.bySession);
+      out.push(`#### Scores by message type (number of gaps)`, ``);
+      out.push(table(["Type", "3", "2", "1", "0", "Total"], P.typeScore.map((r) => [r.label, r.counts[3], r.counts[2], r.counts[1], r.counts[0], r.n])), ``);
+      if (P.typeProblem.problems.length) {
+        out.push(`#### Problems by message type (number of gaps)`, ``);
+        out.push(table(["Type", ...P.typeProblem.problems.map((p) => p.label)], P.typeProblem.types.map((t, i) => [t.label, ...P.typeProblem.cells[i]])), ``);
+      }
+      if (P.problems.length) {
+        out.push(`#### What went wrong`, ``);
+        out.push(
+          table(
+            ["Problem", "Gaps", "% of gaps", "Mostly in", "Example (paraphrase before use)"],
+            P.problems.map((p) => [p.label, p.count, pct(p.share), p.types.join(", ") || "–", p.example ? `"${p.example.original}" → "${p.example.predicted}"` : "–"]),
+          ),
+          ``,
+        );
+      }
+    }
     out.push(`### Table 3. Score distribution`, ``);
     out.push(table(["Score", "Meaning", "n", "%"], e.distribution.map((d) => [d.score, d.label, d.count, pct(d.share, 1)])), ``);
     out.push(
